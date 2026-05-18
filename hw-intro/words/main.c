@@ -47,6 +47,34 @@ WordCount *word_counts = NULL;
 int num_words(FILE* infile) {
   int num_words = 0;
 
+  // what is the definition of a word? when do we stop counting a word?
+  // word is a series of continguous alphabetical chars that match the limit
+  // AND until a non-alphabetical char is found
+
+
+  // how to identify a word:
+  // increment a counter for each alphabetical char you see
+  // the minute you see a non-alphabetical char, you check your counter and if > 1, increment
+  // num_words by 1 and reset the local counter
+  int local_word_counter = 0;
+  int c;
+  while ((c = fgetc(infile)) != EOF) {
+    // char is alphabetical
+    printf("Current char in infile: %c\n", c);
+    if (isalpha(c)) {
+      local_word_counter++;
+    } else {
+      // char is non-alphabetical
+      if (local_word_counter > 1) {
+        num_words++;
+        local_word_counter = 0;
+      }
+    }
+  }
+  // edge case where a word is counted before EOF so that word is not counted
+  if (local_word_counter > 1) {
+    num_words++;
+  }
   return num_words;
 }
 
@@ -133,10 +161,27 @@ int main (int argc, char *argv[]) {
   if ((argc - optind) < 1) {
     // No input file specified, instead, read from STDIN instead.
     infile = stdin;
+    total_words =  num_words(infile);
+    printf("total_words is %d\n", total_words);
+
   } else {
     // At least one file specified. Useful functions: fopen(), fclose().
     // The first file can be found at argv[optind]. The last file can be
     // found at argv[argc-1].
+
+   // we can have multiple files specified
+   // iterate from optind till argc-1 (inclusive) to get all files to read from
+   // each file index can use fopen to read disk from and pull into memory
+   for (int i = optind; i < argc; i++) {
+    char* currentFileToReadFrom = argv[i];
+    infile = fopen(currentFileToReadFrom, "r");
+    if (infile == NULL) {
+      exit(-1);
+    }
+    int numWordsInReadFile = num_words(infile);
+    total_words += numWordsInReadFile;
+    fclose(infile);
+   }
   }
 
   if (count_mode) {
