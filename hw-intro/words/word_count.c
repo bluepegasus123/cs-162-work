@@ -37,6 +37,9 @@ int init_words(WordCount **wclist) {
      Returns 0 if no errors are encountered
      in the body of this function; 1 otherwise.
   */
+  // Want to store an address in *wclist
+  // *wclist is dereferencing the first pointer
+  
   *wclist = NULL;
   return 0;
 }
@@ -46,13 +49,26 @@ ssize_t len_words(WordCount *wchead) {
      encountered in the body of
      this function.
   */
+  if (wchead == NULL) {
+    return -1;
+  }
     size_t len = 0;
+    while (wchead != NULL) {
+      len++;
+      wchead = wchead->next;
+    }
     return len;
 }
 
 WordCount *find_word(WordCount *wchead, char *word) {
   /* Return count for word, if it exists */
-  WordCount *wc = NULL;
+  if (wchead == NULL || word == NULL) {
+    return NULL;
+  }
+  WordCount *wc = wchead;
+  while (strcmp(wc->word, word) != 0) {
+    wc = wc->next;
+  }
   return wc;
 }
 

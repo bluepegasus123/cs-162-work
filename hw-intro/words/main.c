@@ -45,6 +45,9 @@ WordCount *word_counts = NULL;
  * Useful functions: fgetc(), isalpha().
  */
 int num_words(FILE* infile) {
+  if (infile == NULL) {
+    return 0;
+  }
   int num_words = 0;
 
   // what is the definition of a word? when do we stop counting a word?
@@ -60,7 +63,7 @@ int num_words(FILE* infile) {
   int c;
   while ((c = fgetc(infile)) != EOF) {
     // char is alphabetical
-    printf("Current char in infile: %c\n", c);
+    // printf("Current char in infile: %c\n", c);
     if (isalpha(c)) {
       local_word_counter++;
     } else {
@@ -162,7 +165,7 @@ int main (int argc, char *argv[]) {
     // No input file specified, instead, read from STDIN instead.
     infile = stdin;
     total_words =  num_words(infile);
-    printf("total_words is %d\n", total_words);
+    // printf("total_words is %d\n", total_words);
 
   } else {
     // At least one file specified. Useful functions: fopen(), fclose().
