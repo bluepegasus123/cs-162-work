@@ -66,18 +66,54 @@ WordCount *find_word(WordCount *wchead, char *word) {
     return NULL;
   }
   WordCount *wc = wchead;
-  while (strcmp(wc->word, word) != 0) {
+  while (wc != NULL && strcmp(wc->word, word) != 0) {
     wc = wc->next;
   }
   return wc;
 }
 
 int add_word(WordCount **wclist, char *word) {
+  // printf("%p\n", word);
+  // printf("%p\n", *wclist);
+  if (wclist == NULL || word == NULL) {
+    return 1;
+  }
+  // if (*wclist == NULL) {
+  //   return 1;
+  // }
+  
+  // printf("%p\n", *wclist);
   /* If word is present in word_counts list, increment the count.
      Otherwise insert with count 1.
      Returns 0 if no errors are encountered in the body of this function; 1 otherwise.
   */
- return 0;
+  WordCount *head = *wclist;
+  WordCount *foundNode = find_word(head, word);
+  if (foundNode == NULL) {
+    //allocate here
+    // if main.c will sort this list for me, then i can insert at the end of the list
+    // insert to beginning of the list to make it easier and it'll be corrected later on
+    WordCount *allocatedNode = malloc(sizeof(WordCount));
+    if (allocatedNode == NULL) {
+      return 1;
+    }
+    allocatedNode->count = 1;
+    char* newStringPointer = new_string(word);
+    if (newStringPointer == NULL) {
+      return 1;
+    }
+    allocatedNode->word = newStringPointer;
+
+    // set the current head to be this
+    *wclist = allocatedNode;
+    allocatedNode->next = head;
+  } else {
+    // adjust the foundNode's count property
+    foundNode->count = foundNode->count + 1;
+  }
+  return 0;
+
+  
 }
 
 void fprint_words(WordCount *wchead, FILE *ofile) {

@@ -93,6 +93,46 @@ int num_words(FILE* infile) {
  * and 0 otherwise.
  */
 int count_words(WordCount **wclist, FILE *infile) {
+  // need a way to gather all the found characters together so far
+  char current_word[MAX_WORD_LEN];
+  int local_word_counter = 0;
+  int c;
+  while ((c = fgetc(infile)) != EOF) {
+    // char is alphabetical
+    // printf("Current char in infile: %c\n", c);
+    if (isalpha(c)) {
+      if (local_word_counter == MAX_WORD_LEN) {
+        return 1;
+      }
+      current_word[local_word_counter] = (char) tolower(c);
+      local_word_counter++;
+    } else {
+      // char is non-alphabetical
+      if (local_word_counter > 1) {
+        // once you have found a complete word, process it
+        current_word[local_word_counter] = '\0';
+        // printf("current word parsed: %s\n", current_word);
+        int result = add_word(wclist, current_word);
+        if (result) {
+          // printf("Goes into add_word failed case");
+          return 1;
+        } else {
+          // printf("Goes into add_word succeeded case");
+          local_word_counter = 0;
+        }
+        
+      }
+    }
+  }
+  // edge case where a word is counted before EOF so that word is not process
+  if (local_word_counter > 1) {
+    // process this last word
+    current_word[local_word_counter] = '\0';
+    int result = add_word(wclist, current_word);
+    if (result) {
+      return 1;
+    }
+  }
   return 0;
 }
 
@@ -101,7 +141,28 @@ int count_words(WordCount **wclist, FILE *infile) {
  * Useful function: strcmp().
  */
 static bool wordcount_less(const WordCount *wc1, const WordCount *wc2) {
-  return 0;
+  if (wc1 == NULL || wc2 == NULL) {
+    exit(1);
+  }
+  // first check the count - if same proceed with comparision of words
+  int wc1Count = wc1->count;
+  int wc2Count = wc2->count;
+  if (wc1Count < wc2Count) {
+    return true;
+  } else if (wc1Count > wc2Count) {
+    return false;
+  } else {
+    // compare word strings here
+    int result =  strcmp(wc1->word, wc2->word);
+    if (result < 0) {
+      return true;
+    } else if (result > 0) {
+      return false;
+    } else {
+      // non-existent state of two nodes having same words - exit program in this case
+      exit(1);
+    }
+  }
 }
 
 // In trying times, displays a helpful message.
@@ -168,6 +229,20 @@ int main (int argc, char *argv[]) {
     // printf("total_words is %d\n", total_words);
 
   } else {
+    // Test out single file inputs for the frequency program
+    // [FREQUENCY PROGRAM]
+    char* file = argv[optind];
+    // printf("%c\n", *(file+1));
+    infile = fopen(file, "r");
+    if (infile == NULL) {
+      exit(-1);
+    }
+    count_words(&word_counts, infile);
+    fclose(infile);
+
+
+
+
     // At least one file specified. Useful functions: fopen(), fclose().
     // The first file can be found at argv[optind]. The last file can be
     // found at argv[argc-1].
@@ -175,23 +250,22 @@ int main (int argc, char *argv[]) {
    // we can have multiple files specified
    // iterate from optind till argc-1 (inclusive) to get all files to read from
    // each file index can use fopen to read disk from and pull into memory
-   for (int i = optind; i < argc; i++) {
-    char* currentFileToReadFrom = argv[i];
-    infile = fopen(currentFileToReadFrom, "r");
-    if (infile == NULL) {
-      exit(-1);
-    }
-    int numWordsInReadFile = num_words(infile);
-    total_words += numWordsInReadFile;
-    fclose(infile);
-   }
+  //  for (int i = optind; i < argc; i++) {
+  //   char* currentFileToReadFrom = argv[i];
+  //   infile = fopen(currentFileToReadFrom, "r");
+  //   if (infile == NULL) {
+  //     exit(-1);
+  //   }
+  //   int numWordsInReadFile = num_words(infile);
+  //   total_words += numWordsInReadFile;
+  //   fclose(infile);
+  //  }
   }
 
   if (count_mode) {
     printf("The total number of words is: %i\n", total_words);
   } else {
     wordcount_sort(&word_counts, wordcount_less);
-
     printf("The frequencies of each word are: \n");
     fprint_words(word_counts, stdout);
 }
