@@ -32,6 +32,14 @@
 #include "word_count.h"
 #include "word_helpers.h"
 
+void* threadfun(void* args) {
+  thread_function_args* function_args = (thread_function_args*) args;
+  FILE *f = fopen(function_args->filename, "r");
+  count_words(function_args->list, f);
+  fclose(f);
+  pthread_exit(NULL);
+}
+
 /*
  * main - handle command line, spawning one thread per file.
  */
@@ -45,6 +53,34 @@ int main(int argc, char* argv[]) {
     count_words(&word_counts, stdin);
   } else {
     /* TODO */
+    // Now we have 1 or more files to read from
+    // for each file, dispatch a new thread
+    int num_threads = argc - 1;
+    pthread_t threads[num_threads];
+    // for (int i = 1; i < argc; i++) {
+    //   char* file_name = argv[i];
+    //   FILE *f = fopen(file_name, "r");
+    //   count_words(&word_counts, f);
+    // }
+
+    // for each thread, iterate through argv and read from the relevant file
+    for (int t = 0; t < num_threads; t++) {
+      char *file_name = argv[t+1];
+      thread_function_args args = {
+        &word_counts,
+        file_name
+      };
+      int rc = pthread_create(&(threads[t]), NULL, threadfun, (void*) &args);
+      if (rc) {
+        printf("ERROR; return code from pthread_create() is %d\n", rc);
+        exit(-1);
+      }
+    }
+
+
+    for (int t = 0; t < num_threads; t++) {
+      pthread_join(threads[t], NULL);
+    }
   }
 
   /* Output final result of all threads' work. */
@@ -52,3 +88,4 @@ int main(int argc, char* argv[]) {
   fprint_words(&word_counts, stdout);
   return 0;
 }
+
