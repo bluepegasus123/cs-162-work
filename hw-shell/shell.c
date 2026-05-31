@@ -63,7 +63,7 @@ int cmd_exit(unused struct tokens* tokens) { exit(0); }
 // Prints the current working directory to stdout
 int cmd_pwd(unused struct tokens* tokens) {
   char buf[4096];
-  printf("%p\n", buf);
+  // printf("%p\n", buf);
   char* return_address = getcwd(buf, sizeof(buf));
   if (return_address == NULL) {
     printf("Error while trying to get current working directory\n");
@@ -90,6 +90,107 @@ int lookup(char cmd[]) {
     if (cmd && (strcmp(cmd_table[i].cmd, cmd) == 0))
       return i;
   return -1;
+}
+
+// Forks a new child process and runs execv in it to run tokens[0] as executable path and tokens[1-N] as arguments to that executable
+int runProgramUsingFullPath(unused struct tokens* tokens) {
+  // create an array of tokens_size strings and iterate and store each one
+  // include an element for the NULL pointer as well
+  size_t num_tokens = tokens_get_length(tokens);
+  // Here - check if the path is in CWD
+  // YES - continue 
+  // NO - use path resolution to match potential directory with this executable and if a match is found - pass that resolved path to execv
+  char* executable_path = tokens_get_token(tokens, 0);
+  if (access(executable_path, X_OK) == -1) {
+    char* path = getenv("PATH");
+    char* save_ptr;
+    char* copied_path = strdup(path);
+    char* dir = strtok_r(copied_path, ":", &save_ptr);
+    bool hasResolvedPath = false;
+    char* resolved_path_pass_through;
+    
+    while (dir != NULL) {
+      // join this dir with the executable name - need to create a char array with dir + "/" + executable name
+      int resolved_path_length = (int) (strlen(dir) + 1 + strlen(executable_path));
+      // + 1 is for the /
+      int executablePathPointer = 0;
+      char resolved_path[resolved_path_length + 1];
+      for (int i = 0; i < resolved_path_length; i++) {
+        if (i == strlen(dir)) {
+          resolved_path[i] = '/';
+        } else if (i >=0 && i< strlen(dir)){
+          resolved_path[i] = dir[i];
+        } else {
+          resolved_path[i] = executable_path[executablePathPointer];
+          executablePathPointer++;
+        }
+      }
+      resolved_path[resolved_path_length] = '\0';
+      // if this resolved_path works, break the loop
+      // if we haven't found any resolved path, print an error mentioning that there is no resolvable path to executable
+      if (access(resolved_path, X_OK) == 0) {
+        hasResolvedPath = true;
+        resolved_path_pass_through = strdup(resolved_path);
+        break;
+      }
+      dir = strtok_r(NULL, ":", &save_ptr);
+    }
+    free(copied_path);
+    if (!hasResolvedPath) {
+      printf("error: path could not be resolved for executable\n");
+      return -1;
+    }
+    // printf("[after strtok_r]: resolved path: %s\n", resolved_path_pass_through);
+    char* argv[num_tokens+1];
+    for (int i = 0; i < num_tokens; i++) {
+      if (i == 0) {
+        argv[i] = resolved_path_pass_through;
+      } else {
+        char* current_arg = tokens_get_token(tokens, i);
+      // printf("current arg: %s\n", current_arg);
+        argv[i] = current_arg;
+      }
+    }
+    argv[num_tokens] = NULL;
+
+    pid_t pid = fork();
+    if (pid == 0) {
+      // child process execution
+      execv(resolved_path_pass_through, argv);
+      printf("executing program caused error\n");
+      exit(1);
+    } else {
+      // parent process execution
+      waitpid(pid, NULL, 0);
+      free(resolved_path_pass_through);
+    }
+    return 1;
+
+
+  } else {
+    char* argv[num_tokens+1];
+    for (int i = 0; i < num_tokens; i++) {
+      char* current_arg = tokens_get_token(tokens, i);
+      // printf("current arg: %s\n", current_arg);
+      argv[i] = current_arg;
+    }
+    argv[num_tokens] = NULL;
+
+    
+    
+    pid_t pid = fork();
+    if (pid == 0) {
+      // child process execution
+      execv(executable_path, argv);
+      printf("executing program caused error\n");
+      exit(1);
+    } else {
+      // parent process execution
+      waitpid(pid, NULL, 0);
+    }
+    return 1;
+  }
+  
 }
 
 /* Intialization procedures for this shell */
@@ -139,7 +240,8 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      // fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      runProgramUsingFullPath(tokens);
     }
 
     if (shell_is_interactive)
