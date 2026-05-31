@@ -30,6 +30,8 @@ pid_t shell_pgid;
 
 int cmd_exit(struct tokens* tokens);
 int cmd_help(struct tokens* tokens);
+int cmd_pwd(struct tokens* tokens);
+int cmd_cd(struct tokens* tokens);
 
 /* Built-in command functions take token array (see parse.h) and return int */
 typedef int cmd_fun_t(struct tokens* tokens);
@@ -44,6 +46,8 @@ typedef struct fun_desc {
 fun_desc_t cmd_table[] = {
     {cmd_help, "?", "show this help menu"},
     {cmd_exit, "exit", "exit the command shell"},
+    {cmd_pwd, "pwd", "print the current working directory"},
+    {cmd_cd, "cd", "change to a target directory"}
 };
 
 /* Prints a helpful description for the given command */
@@ -55,6 +59,30 @@ int cmd_help(unused struct tokens* tokens) {
 
 /* Exits this shell */
 int cmd_exit(unused struct tokens* tokens) { exit(0); }
+
+// Prints the current working directory to stdout
+int cmd_pwd(unused struct tokens* tokens) {
+  char buf[4096];
+  printf("%p\n", buf);
+  char* return_address = getcwd(buf, sizeof(buf));
+  if (return_address == NULL) {
+    printf("Error while trying to get current working directory\n");
+    return -1;
+  }
+  printf("%s\n", buf);
+  return 1;
+}
+
+int cmd_cd(unused struct tokens* tokens) {
+  // retrieve argument from tokens
+  char* new_directory = tokens_get_token(tokens, 1);
+  if (chdir(new_directory) == -1) {
+    printf("Error while trying to change to target directory: %s\n", new_directory);
+    return -1;
+  } else {
+    return 1;
+  }
+}
 
 /* Looks up the built-in command, if it exists. */
 int lookup(char cmd[]) {
