@@ -93,7 +93,7 @@ int lookup(char cmd[]) {
 }
 
 // Forks a new child process and runs execv in it to run tokens[0] as executable path and tokens[1-N] as arguments to that executable
-int runProgramUsingFullPath(unused struct tokens* tokens) {
+int runProgram(unused struct tokens* tokens) {
   // create an array of tokens_size strings and iterate and store each one
   // include an element for the NULL pointer as well
   size_t num_tokens = tokens_get_length(tokens);
@@ -101,6 +101,7 @@ int runProgramUsingFullPath(unused struct tokens* tokens) {
   // YES - continue 
   // NO - use path resolution to match potential directory with this executable and if a match is found - pass that resolved path to execv
   char* executable_path = tokens_get_token(tokens, 0);
+  // PATH to executable is not provided and we must resolve it via PATH
   if (access(executable_path, X_OK) == -1) {
     char* path = getenv("PATH");
     char* save_ptr;
@@ -142,19 +143,57 @@ int runProgramUsingFullPath(unused struct tokens* tokens) {
     }
     // printf("[after strtok_r]: resolved path: %s\n", resolved_path_pass_through);
     char* argv[num_tokens+1];
+    char *stdout_redirection = NULL;
+    char *stdin_redirection = NULL;
+    bool tracked_stdout_redirection_symbol = false;
+    bool tracked_stdin_redirection_symbol = false;
     for (int i = 0; i < num_tokens; i++) {
       if (i == 0) {
         argv[i] = resolved_path_pass_through;
       } else {
         char* current_arg = tokens_get_token(tokens, i);
-      // printf("current arg: %s\n", current_arg);
-        argv[i] = current_arg;
+        if (tracked_stdin_redirection_symbol) {
+          // printf("tracked stdin branch %s\n", current_arg);
+          stdin_redirection = current_arg;
+          tracked_stdin_redirection_symbol = false;
+          // array contents: ./words [NULL]
+        }
+        else if (tracked_stdout_redirection_symbol) {
+          stdout_redirection = current_arg;
+          tracked_stdout_redirection_symbol = false;
+        }
+        else if (strcmp(current_arg, "<") == 0) {
+          tracked_stdin_redirection_symbol = true;
+          argv[i] = NULL;
+        } else if (strcmp(current_arg, ">")== 0) {
+          printf("Goes into > detected branch\n");
+          tracked_stdout_redirection_symbol = true;
+          argv[i] = NULL;
+        } else {
+           // printf("current arg: %s\n", current_arg);
+          argv[i] = current_arg;
+        }
+     
       }
     }
     argv[num_tokens] = NULL;
-
+    for (int i = 0; argv[i] != NULL; i++) {
+        // printf("within argv to child p: %s\n", argv[i]);
+      }
     pid_t pid = fork();
     if (pid == 0) {
+      if (stdin_redirection != NULL) {
+        int new_stdin_redirect_fd = open(stdin_redirection, O_RDONLY);
+        dup2(new_stdin_redirect_fd, 0);
+        close(new_stdin_redirect_fd);
+      }
+
+      if (stdout_redirection != NULL) {
+        int new_stdout_redirect_fd = open(stdout_redirection,O_WRONLY | O_CREAT, 0644);
+        dup2(new_stdout_redirect_fd, 1);
+        close(new_stdout_redirect_fd);
+      }
+      
       // child process execution
       execv(resolved_path_pass_through, argv);
       printf("executing program caused error\n");
@@ -168,18 +207,60 @@ int runProgramUsingFullPath(unused struct tokens* tokens) {
 
 
   } else {
+    // PATH TO executable is provided
+    // Parse for >, < characters
+    // If <, set new child process's stdin FD to point to this file path
+    // Same with >
     char* argv[num_tokens+1];
+    // track stdin redirection path
+    // track stdout redirection path
+    char *stdout_redirection = NULL;
+    char *stdin_redirection = NULL;
+    bool tracked_stdout_redirection_symbol = false;
+    bool tracked_stdin_redirection_symbol = false;
     for (int i = 0; i < num_tokens; i++) {
       char* current_arg = tokens_get_token(tokens, i);
-      // printf("current arg: %s\n", current_arg);
-      argv[i] = current_arg;
+      if (tracked_stdin_redirection_symbol) {
+        // printf("tracked stdin branch %s\n", current_arg);
+        stdin_redirection = current_arg;
+        tracked_stdin_redirection_symbol = false;
+        // array contents: ./words [NULL]
+      }
+      else if (tracked_stdout_redirection_symbol) {
+        stdout_redirection = current_arg;
+        tracked_stdout_redirection_symbol = false;
+        // argv[i] = NULL;
+      }
+      else if (strcmp(current_arg, "<") == 0) {
+        // printf("found < branch %s\n", current_arg);
+        tracked_stdin_redirection_symbol = true;
+        argv[i] = NULL;
+      }
+      else if (strcmp(current_arg, ">")== 0) {
+        tracked_stdout_redirection_symbol = true;
+        argv[i] = NULL;
+      } else {
+        argv[i] = current_arg;
+      }
+
+
+      
     }
     argv[num_tokens] = NULL;
-
-    
-    
+    // printf("stdin_redirection %s\n", stdin_redirection);
+    // set the respective STDIN and STDOUT for this new process
     pid_t pid = fork();
     if (pid == 0) {
+      if (stdin_redirection != NULL) {
+        int new_stdin_redirect_fd = open(stdin_redirection, O_RDONLY);
+        dup2(new_stdin_redirect_fd, 0);
+        close(new_stdin_redirect_fd);
+      }
+
+      if (stdout_redirection != NULL) {
+        int new_stdout_redirect_fd = open(stdout_redirection,O_WRONLY | O_CREAT, 0644);
+        dup2(new_stdout_redirect_fd, 1);
+      }
       // child process execution
       execv(executable_path, argv);
       printf("executing program caused error\n");
@@ -240,8 +321,7 @@ int main(unused int argc, unused char* argv[]) {
       cmd_table[fundex].fun(tokens);
     } else {
       /* REPLACE this to run commands as programs. */
-      // fprintf(stdout, "This shell doesn't know how to run programs.\n");
-      runProgramUsingFullPath(tokens);
+      runProgram(tokens);
     }
 
     if (shell_is_interactive)
