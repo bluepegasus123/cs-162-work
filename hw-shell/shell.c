@@ -92,186 +92,126 @@ int lookup(char cmd[]) {
   return -1;
 }
 
-// Forks a new child process and runs execv in it to run tokens[0] as executable path and tokens[1-N] as arguments to that executable
-int runProgram(unused struct tokens* tokens) {
-  // create an array of tokens_size strings and iterate and store each one
-  // include an element for the NULL pointer as well
-  size_t num_tokens = tokens_get_length(tokens);
-  // Here - check if the path is in CWD
-  // YES - continue 
-  // NO - use path resolution to match potential directory with this executable and if a match is found - pass that resolved path to execv
-  char* executable_path = tokens_get_token(tokens, 0);
-  // PATH to executable is not provided and we must resolve it via PATH
+// Executes a program segment delimited by start_index and end_index.
+// This function assumes it is running within a child process.
+// It resolves the executable path, handles < and > redirections, and calls execv.
+void execProgramSegment(struct tokens* tokens, int start_index, int end_index) {
+  int segment_length = end_index - start_index;
+  if (segment_length == 0) {
+    exit(0);
+  }
+
+  char* executable_path = tokens_get_token(tokens, start_index);
+  char* resolved_path_pass_through = executable_path;
+  bool needs_free = false;
+
+  // PATH to executable is not provided explicitly, resolve via PATH
   if (access(executable_path, X_OK) == -1) {
     char* path = getenv("PATH");
-    char* save_ptr;
-    char* copied_path = strdup(path);
-    char* dir = strtok_r(copied_path, ":", &save_ptr);
-    bool hasResolvedPath = false;
-    char* resolved_path_pass_through;
-    
-    while (dir != NULL) {
-      // join this dir with the executable name - need to create a char array with dir + "/" + executable name
-      int resolved_path_length = (int) (strlen(dir) + 1 + strlen(executable_path));
-      // + 1 is for the /
-      int executablePathPointer = 0;
-      char resolved_path[resolved_path_length + 1];
-      for (int i = 0; i < resolved_path_length; i++) {
-        if (i == strlen(dir)) {
-          resolved_path[i] = '/';
-        } else if (i >=0 && i< strlen(dir)){
-          resolved_path[i] = dir[i];
-        } else {
-          resolved_path[i] = executable_path[executablePathPointer];
-          executablePathPointer++;
+    if (path) {
+      char* copied_path = strdup(path);
+      char* save_ptr;
+      char* dir = strtok_r(copied_path, ":", &save_ptr);
+      bool hasResolvedPath = false;
+      
+      while (dir != NULL) {
+        int resolved_path_length = strlen(dir) + 1 + strlen(executable_path);
+        char resolved_path[resolved_path_length + 1];
+        sprintf(resolved_path, "%s/%s", dir, executable_path);
+        
+        if (access(resolved_path, X_OK) == 0) {
+          hasResolvedPath = true;
+          resolved_path_pass_through = strdup(resolved_path);
+          needs_free = true;
+          break;
         }
+        dir = strtok_r(NULL, ":", &save_ptr);
       }
-      resolved_path[resolved_path_length] = '\0';
-      // if this resolved_path works, break the loop
-      // if we haven't found any resolved path, print an error mentioning that there is no resolvable path to executable
-      if (access(resolved_path, X_OK) == 0) {
-        hasResolvedPath = true;
-        resolved_path_pass_through = strdup(resolved_path);
-        break;
+      free(copied_path);
+      
+      if (!hasResolvedPath) {
+        printf("error: path could not be resolved for executable\n");
+        exit(1);
       }
-      dir = strtok_r(NULL, ":", &save_ptr);
-    }
-    free(copied_path);
-    if (!hasResolvedPath) {
+    } else {
       printf("error: path could not be resolved for executable\n");
-      return -1;
-    }
-    // printf("[after strtok_r]: resolved path: %s\n", resolved_path_pass_through);
-    char* argv[num_tokens+1];
-    char *stdout_redirection = NULL;
-    char *stdin_redirection = NULL;
-    bool tracked_stdout_redirection_symbol = false;
-    bool tracked_stdin_redirection_symbol = false;
-    for (int i = 0; i < num_tokens; i++) {
-      if (i == 0) {
-        argv[i] = resolved_path_pass_through;
-      } else {
-        char* current_arg = tokens_get_token(tokens, i);
-        if (tracked_stdin_redirection_symbol) {
-          // printf("tracked stdin branch %s\n", current_arg);
-          stdin_redirection = current_arg;
-          tracked_stdin_redirection_symbol = false;
-          // array contents: ./words [NULL]
-        }
-        else if (tracked_stdout_redirection_symbol) {
-          stdout_redirection = current_arg;
-          tracked_stdout_redirection_symbol = false;
-        }
-        else if (strcmp(current_arg, "<") == 0) {
-          tracked_stdin_redirection_symbol = true;
-          argv[i] = NULL;
-        } else if (strcmp(current_arg, ">")== 0) {
-          printf("Goes into > detected branch\n");
-          tracked_stdout_redirection_symbol = true;
-          argv[i] = NULL;
-        } else {
-           // printf("current arg: %s\n", current_arg);
-          argv[i] = current_arg;
-        }
-     
-      }
-    }
-    argv[num_tokens] = NULL;
-    for (int i = 0; argv[i] != NULL; i++) {
-        // printf("within argv to child p: %s\n", argv[i]);
-      }
-    pid_t pid = fork();
-    if (pid == 0) {
-      if (stdin_redirection != NULL) {
-        int new_stdin_redirect_fd = open(stdin_redirection, O_RDONLY);
-        dup2(new_stdin_redirect_fd, 0);
-        close(new_stdin_redirect_fd);
-      }
-
-      if (stdout_redirection != NULL) {
-        int new_stdout_redirect_fd = open(stdout_redirection,O_WRONLY | O_CREAT, 0644);
-        dup2(new_stdout_redirect_fd, 1);
-        close(new_stdout_redirect_fd);
-      }
-      
-      // child process execution
-      execv(resolved_path_pass_through, argv);
-      printf("executing program caused error\n");
       exit(1);
-    } else {
-      // parent process execution
-      waitpid(pid, NULL, 0);
-      free(resolved_path_pass_through);
     }
-    return 1;
+  }
 
+  // Parse arguments and standard I/O redirection
+  char* argv[segment_length + 1];
+  char *stdout_redirection = NULL;
+  char *stdin_redirection = NULL;
+  bool tracked_stdout_redirection_symbol = false;
+  bool tracked_stdin_redirection_symbol = false;
+  
+  int arg_idx = 0;
+  for (int i = start_index; i < end_index; i++) {
+    char* current_arg = tokens_get_token(tokens, i);
+    
+    if (tracked_stdin_redirection_symbol) {
+      stdin_redirection = current_arg;
+      tracked_stdin_redirection_symbol = false;
+    } else if (tracked_stdout_redirection_symbol) {
+      stdout_redirection = current_arg;
+      tracked_stdout_redirection_symbol = false;
+    } else if (strcmp(current_arg, "<") == 0) {
+      tracked_stdin_redirection_symbol = true;
+    } else if (strcmp(current_arg, ">") == 0) {
+      tracked_stdout_redirection_symbol = true;
+    } else {
+      if (arg_idx == 0) {
+        argv[arg_idx++] = resolved_path_pass_through;
+      } else {
+        argv[arg_idx++] = current_arg;
+      }
+    }
+  }
+  argv[arg_idx] = NULL;
 
+  // Apply I/O redirections
+  if (stdin_redirection != NULL) {
+    int new_stdin_redirect_fd = open(stdin_redirection, O_RDONLY);
+    if (new_stdin_redirect_fd >= 0) {
+      dup2(new_stdin_redirect_fd, 0);
+      close(new_stdin_redirect_fd);
+    }
+  }
+
+  if (stdout_redirection != NULL) {
+    int new_stdout_redirect_fd = open(stdout_redirection, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (new_stdout_redirect_fd >= 0) {
+      dup2(new_stdout_redirect_fd, 1);
+      close(new_stdout_redirect_fd);
+    }
+  }
+
+  // Execute child process
+  execv(resolved_path_pass_through, argv);
+  printf("executing program caused error\n");
+  if (needs_free) free(resolved_path_pass_through);
+  exit(1);
+}
+
+// Forks a single child process to run the command segment.
+// This preserves existing functionality while isolating execution in execProgramSegment
+int runProgram(unused struct tokens* tokens) {
+  size_t num_tokens = tokens_get_length(tokens);
+  
+  pid_t pid = fork();
+  if (pid == 0) {
+    // Child process executes the entire token sequence
+    execProgramSegment(tokens, 0, num_tokens);
+  } else if (pid > 0) {
+    // Parent process waits for child
+    waitpid(pid, NULL, 0);
   } else {
-    // PATH TO executable is provided
-    // Parse for >, < characters
-    // If <, set new child process's stdin FD to point to this file path
-    // Same with >
-    char* argv[num_tokens+1];
-    // track stdin redirection path
-    // track stdout redirection path
-    char *stdout_redirection = NULL;
-    char *stdin_redirection = NULL;
-    bool tracked_stdout_redirection_symbol = false;
-    bool tracked_stdin_redirection_symbol = false;
-    for (int i = 0; i < num_tokens; i++) {
-      char* current_arg = tokens_get_token(tokens, i);
-      if (tracked_stdin_redirection_symbol) {
-        // printf("tracked stdin branch %s\n", current_arg);
-        stdin_redirection = current_arg;
-        tracked_stdin_redirection_symbol = false;
-        // array contents: ./words [NULL]
-      }
-      else if (tracked_stdout_redirection_symbol) {
-        stdout_redirection = current_arg;
-        tracked_stdout_redirection_symbol = false;
-        // argv[i] = NULL;
-      }
-      else if (strcmp(current_arg, "<") == 0) {
-        // printf("found < branch %s\n", current_arg);
-        tracked_stdin_redirection_symbol = true;
-        argv[i] = NULL;
-      }
-      else if (strcmp(current_arg, ">")== 0) {
-        tracked_stdout_redirection_symbol = true;
-        argv[i] = NULL;
-      } else {
-        argv[i] = current_arg;
-      }
-
-
-      
-    }
-    argv[num_tokens] = NULL;
-    // printf("stdin_redirection %s\n", stdin_redirection);
-    // set the respective STDIN and STDOUT for this new process
-    pid_t pid = fork();
-    if (pid == 0) {
-      if (stdin_redirection != NULL) {
-        int new_stdin_redirect_fd = open(stdin_redirection, O_RDONLY);
-        dup2(new_stdin_redirect_fd, 0);
-        close(new_stdin_redirect_fd);
-      }
-
-      if (stdout_redirection != NULL) {
-        int new_stdout_redirect_fd = open(stdout_redirection,O_WRONLY | O_CREAT, 0644);
-        dup2(new_stdout_redirect_fd, 1);
-      }
-      // child process execution
-      execv(executable_path, argv);
-      printf("executing program caused error\n");
-      exit(1);
-    } else {
-      // parent process execution
-      waitpid(pid, NULL, 0);
-    }
-    return 1;
+    perror("fork error");
+    return -1;
   }
   
+  return 1;
 }
 
 /* Intialization procedures for this shell */
