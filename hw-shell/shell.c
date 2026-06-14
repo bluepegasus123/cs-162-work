@@ -180,6 +180,7 @@ void execProgramSegment(struct tokens* tokens, int start_index, int end_index) {
   }
 
   if (stdout_redirection != NULL) {
+    // printf("goes into stdout_redirection branch for child process\n");
     int new_stdout_redirect_fd = open(stdout_redirection, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (new_stdout_redirect_fd >= 0) {
       dup2(new_stdout_redirect_fd, 1);
@@ -202,10 +203,26 @@ int runProgram(unused struct tokens* tokens) {
   pid_t pid = fork();
   if (pid == 0) {
     // Child process executes the entire token sequence
+
     execProgramSegment(tokens, 0, num_tokens);
   } else if (pid > 0) {
     // Parent process waits for child
-    waitpid(pid, NULL, 0);
+    // put the child process into its own group
+    // set the terminal's FG group to this group
+    // set this as foreground process here
+    int result = setpgid(pid, pid);
+    if (result == -1) {
+      // wait for the children to finish and don't leave them as oprhans
+      printf("goes into failed to setpgid branch\n");
+      waitpid(pid, NULL, 0);
+    } else {
+      // printf("Goes into succeeded to setpgid branch for child: %d\n", pid);
+      tcsetpgrp(shell_terminal, pid);
+      waitpid(pid, NULL, 0);
+      // printf("shell program's current pgroup: %d\n", getpgrp());
+      tcsetpgrp(shell_terminal, getpgrp());
+      // printf("finishes setting shell pg back to FG\n");
+    }
   } else {
     perror("fork error");
     return -1;
@@ -337,21 +354,22 @@ int runProgramWithPipes(struct tokens* tokens, int num_pipes) {
   size_t curr_index = 0;
   int current_process_start_index = 0;
   size_t num_tokens = tokens_get_length(tokens);
-  
+
   int process_index = -1;
   pid_t pids[num_pipes + 1];
+  pid_t pipeline_pgid = -1;
 
   while (curr_index <= num_tokens) {
     char* token = NULL;
     if (curr_index < num_tokens) {
       token = tokens_get_token(tokens, curr_index);
     }
-    
+
     if (curr_index == num_tokens || strcmp("|", token) == 0) {
       process_index++;
       bool dup_stdin = false;
       bool dup_stdout = false;
-      
+
       if (process_index == 0) {
         dup_stdout = true;
       } else if (process_index == num_pipes) {
@@ -367,10 +385,22 @@ int runProgramWithPipes(struct tokens* tokens, int num_pipes) {
         dup_stdin, dup_stdout
       );
 
+      // Put every child into one shared process group.
+      // The first child's pid becomes the pipeline's pgid.
+      if (process_index == 0) {
+        pipeline_pgid = pids[0];
+        setpgid(pids[0], pipeline_pgid);
+      } else {
+        setpgid(pids[process_index], pipeline_pgid);
+      }
+
       current_process_start_index = curr_index + 1;
     }
     curr_index++;
   }
+
+  // Hand the terminal to the pipeline's process group.
+  tcsetpgrp(shell_terminal, pipeline_pgid);
 
   // Close all FDs in the parent process outer function
   for (int i = 0; i < num_pipes; i++) {
@@ -384,6 +414,9 @@ int runProgramWithPipes(struct tokens* tokens, int num_pipes) {
       waitpid(pids[i], NULL, 0);
     }
   }
+
+  // Reclaim the terminal for the shell.
+  tcsetpgrp(shell_terminal, getpgrp());
 
   return 1;
 }
@@ -408,6 +441,8 @@ void init_shell() {
 
     /* Take control of the terminal */
     tcsetpgrp(shell_terminal, shell_pgid);
+    // printf("shell program pgid: %d\n", shell_pgid);
+    signal(SIGTTOU, SIG_IGN);
 
     /* Save the current termios to a variable, so it can be restored later. */
     tcgetattr(shell_terminal, &shell_tmodes);
